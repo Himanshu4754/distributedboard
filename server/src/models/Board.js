@@ -1,32 +1,37 @@
 import mongoose from 'mongoose';
 
-const elementSchema = new mongoose.Schema({
-  id: String,
-  tool: { type: String, enum: ['pencil', 'rect', 'circle', 'text'] },
-  points: [Number],
-  x: Number,
-  y: Number,
-  width: Number,
-  height: Number,
-  color: String,
-  strokeWidth: Number,
-  text: String,
-}, { _id: false });
+const elementSchema = new mongoose.Schema(
+  {
+    id:          { type: String, required: true },
+    tool:        { type: String, enum: ['pencil', 'eraser', 'rect', 'circle'], required: true },
+    points:      { type: [Number], default: undefined },
+    x:           Number,
+    y:           Number,
+    width:       Number,
+    height:      Number,
+    color:       { type: String, default: '#ffffff' },
+    strokeWidth: { type: Number, default: 3 },
+  },
+  { _id: false }
+);
+
+const versionSchema = new mongoose.Schema(
+  {
+    elements: [elementSchema],
+    savedAt:  { type: Date, default: Date.now },
+  },
+  { _id: false }
+);
 
 const boardSchema = new mongoose.Schema({
-  roomId: { type: String, required: true, unique: true, index: true },
-  elements: [elementSchema],
-  versions: [{
-    elements: [elementSchema],
-    savedAt: { type: Date, default: Date.now },
-  }],
+  roomId:    { type: String, required: true, unique: true },
+  elements:  { type: [elementSchema], default: [] },
+  versions:  { type: [versionSchema], default: [] },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
 });
 
-boardSchema.pre('save', function (next) {
-  this.updatedAt = new Date();
-  next();
-});
+// Compound index for fast lookups
+boardSchema.index({ roomId: 1, updatedAt: -1 });
 
 export default mongoose.model('Board', boardSchema);

@@ -1,49 +1,66 @@
 import { create } from 'zustand';
 
 const useBoardStore = create((set, get) => ({
-  // Drawing state
+  // Board data
   elements: [],
   currentElement: null,
+
+  // Tool state
   tool: 'pencil',
   color: '#ffffff',
   strokeWidth: 3,
 
-  // Collaboration state
+  // Undo history (stack of element snapshots)
+  history: [],
+
+  // Collaboration
   users: [],
   cursors: {},
   roomId: null,
   username: null,
 
-  // History for undo
-  history: [],
+  // UI state
+  isSaving: false,
+  isLoading: true,
 
-  // Actions
-  setTool: (tool) => set({ tool }),
-  setColor: (color) => set({ color }),
-  setStrokeWidth: (w) => set({ strokeWidth: w }),
-  setUsers: (users) => set({ users }),
-  setRoomId: (roomId) => set({ roomId }),
+  // ── Tool actions ─────────────────────────────────────────────────────────
+  setTool:        (tool)        => set({ tool }),
+  setColor:       (color)       => set({ color }),
+  setStrokeWidth: (strokeWidth) => set({ strokeWidth }),
+
+  // ── Room actions ─────────────────────────────────────────────────────────
+  setRoomId:   (roomId)   => set({ roomId }),
   setUsername: (username) => set({ username }),
+  setUsers:    (users)    => set({ users }),
+  setLoading:  (v)        => set({ isLoading: v }),
+  setSaving:   (v)        => set({ isSaving: v }),
 
+  // ── Element actions ───────────────────────────────────────────────────────
+
+  // Add a completed element (saves undo snapshot first)
   addElement: (element) =>
     set((state) => ({
       elements: [...state.elements, element],
-      history: [...state.history, state.elements],
+      history: [...state.history.slice(-49), [...state.elements]], // keep 50 history items
     })),
 
+  // Update the last element in place (used while drawing in progress)
   updateLastElement: (element) =>
     set((state) => ({
       elements: [...state.elements.slice(0, -1), element],
     })),
 
-  setElements: (elements) => set({ elements, history: [] }),
+  // Replace entire element list (on join / sync / restore)
+  setElements: (elements) =>
+    set({ elements, history: [], isLoading: false }),
 
   clearElements: () =>
     set((state) => ({
       elements: [],
-      history: [...state.history, state.elements],
+      history: [...state.history.slice(-49), [...state.elements]],
     })),
 
+  // Pop last history snapshot
   undo: () =>
     set((state) => {
       if (state.history.length === 0) return state;
@@ -54,6 +71,7 @@ const useBoardStore = create((set, get) => ({
       };
     }),
 
+  // ── Cursor tracking ───────────────────────────────────────────────────────
   updateCursor: (userId, data) =>
     set((state) => ({
       cursors: { ...state.cursors, [userId]: data },

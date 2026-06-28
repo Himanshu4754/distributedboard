@@ -18,3 +18,10 @@ export const getUsers = (roomId) => {
   if (!rooms.has(roomId)) return [];
   return Array.from(rooms.get(roomId).values());
 };
+
+export const updateCursor = (roomId, userId, coords) => {
+  if (rooms.has(roomId) && rooms.get(roomId).has(userId)) {
+    const user = rooms.get(roomId).get(userId);
+    rooms.get(roomId).set(userId, { ...user, ...coords });
+  }
+};

@@ -2,187 +2,162 @@ import { v4 as uuidv4 } from 'uuid';
 import Board from '../models/Board.js';
 import { joinRoom, leaveRoom, getUsers, updateCursor } from './roomManager.js';
 
-// Debounce map: roomId → timeout handle
-const autoSaveTimers = new Map();
-
-const AUTO_SAVE_DELAY = 3000; // ms
-
-// ── Helpers ───────────────────────────────────────────────────────────────
-
-const COLORS = [
-  '#f87171', '#fb923c', '#fbbf24', '#34d399',
-  '#38bdf8', '#818cf8', '#e879f9', '#f472b6',
-];
-
+const COLORS = ['#f87171','#fb923c','#fbbf24','#34d399','#38bdf8','#818cf8','#e879f9','#f472b6'];
 const generateColor = (id) => {
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) {
-    hash = id.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  return COLORS[Math.abs(hash) % COLORS.length];
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = id.charCodeAt(i) + ((h << 5) - h);
+  return COLORS[Math.abs(h) % COLORS.length];
 };
 
-// Debounced auto-save: resets timer every time an element arrives
-const scheduleAutoSave = (roomId, elements) => {
-  if (autoSaveTimers.has(roomId)) {
-    clearTimeout(autoSaveTimers.get(roomId));
+// In-memory element log per room for conflict resolution
+// Structure: roomId → Map<elementId, element>
+const roomElements = new Map();
+
+const getRoomElements = (roomId) => {
+  if (!roomElements.has(roomId)) roomElements.set(roomId, new Map());
+  return roomElements.get(roomId);
+};
+
+// Last-write-wins: newer timestamp always wins
+const mergeElement = (roomId, incoming) => {
+  const store   = getRoomElements(roomId);
+  const existing = store.get(incoming.id);
+
+  // Accept if: new element OR incoming is newer (timestamp-based LWW)
+  if (!existing || (incoming.timestamp || 0) >= (existing.timestamp || 0)) {
+    store.set(incoming.id, { ...incoming, timestamp: incoming.timestamp || Date.now() });
+    return true;
   }
+  return false; // reject stale update
+};
+
+const pendingSaves = new Map();
+
+const scheduleAutoSave = (roomId) => {
+  if (pendingSaves.has(roomId)) clearTimeout(pendingSaves.get(roomId));
   const timer = setTimeout(async () => {
     try {
+      const elements = Array.from(getRoomElements(roomId).values());
       await Board.findOneAndUpdate(
         { roomId },
         { $set: { elements, updatedAt: new Date() } },
         { upsert: true }
       );
-      console.log(`Auto-saved board ${roomId} (${elements.length} elements)`);
+      console.log(`[Auto-save] ${roomId} → ${elements.length} elements`);
     } catch (err) {
-      console.error(`Auto-save failed for ${roomId}:`, err.message);
+      console.error(`[Auto-save] FAILED ${roomId}:`, err.message);
     } finally {
-      autoSaveTimers.delete(roomId);
+      pendingSaves.delete(roomId);
     }
-  }, AUTO_SAVE_DELAY);
-  autoSaveTimers.set(roomId, timer);
+  }, 3000);
+  pendingSaves.set(roomId, timer);
 };
-
-// ── Main handler ──────────────────────────────────────────────────────────
 
 export const initSocketHandlers = (io) => {
   io.on('connection', (socket) => {
-    console.log(`Socket connected: ${socket.id}`);
+    console.log(`[Socket] Connected: ${socket.id}`);
 
-    // ── JOIN ROOM ──────────────────────────────────────────────────────────
     socket.on('join-room', async ({ roomId, username }) => {
       socket.join(roomId);
-      socket.roomId = roomId;
+      socket.roomId   = roomId;
       socket.username = username;
-      socket.userId = uuidv4();
-      socket.color = generateColor(socket.id);
+      socket.userId   = uuidv4();
+      socket.color    = generateColor(socket.id);
 
       const users = joinRoom(roomId, {
-        id: socket.userId,
-        socketId: socket.id,
-        username,
-        color: socket.color,
+        id: socket.userId, socketId: socket.id, username, color: socket.color,
       });
 
-      // Notify others
-      socket.to(roomId).emit('user-joined', {
-        userId: socket.userId,
-        username,
-        users,
-      });
+      socket.to(roomId).emit('user-joined', { userId: socket.userId, username, users });
 
-      // Send this socket the full board + user list
       try {
         const board = await Board.findOne({ roomId }).lean();
-        socket.emit('board-state', {
-          elements: board?.elements ?? [],
-          users,
-        });
+        const elements = board?.elements ?? [];
+
+        // Seed in-memory store if empty (first load from DB)
+        if (getRoomElements(roomId).size === 0 && elements.length > 0) {
+          elements.forEach(el => getRoomElements(roomId).set(el.id, el));
+        }
+
+        console.log(`[Join] ${username} → room ${roomId} | ${elements.length} elements`);
+        socket.emit('board-state', { elements, users });
       } catch (err) {
-        console.error('Failed to load board on join:', err.message);
+        console.error(`[Join] Load failed for ${roomId}:`, err.message);
         socket.emit('board-state', { elements: [], users });
       }
 
       io.to(roomId).emit('users-updated', users);
-      console.log(`${username} joined room ${roomId} (${users.length} users)`);
     });
 
-    // ── DRAW ELEMENT (completed stroke/shape) ─────────────────────────────
+    // draw-element: LWW merge then broadcast
     socket.on('draw-element', async ({ roomId, element }) => {
-      // 1. Broadcast to peers immediately
-      socket.to(roomId).emit('draw-element', element);
+      const enriched = { ...element, userId: socket.userId, timestamp: Date.now() };
+      const accepted = mergeElement(roomId, enriched);
 
-      // 2. Push element into DB array atomically
-      try {
-        await Board.findOneAndUpdate(
-          { roomId },
-          {
-            $push: { elements: element },
-            $set: { updatedAt: new Date() },
-          },
-          { upsert: true }
-        );
-      } catch (err) {
-        console.error(`Failed to persist element in ${roomId}:`, err.message);
+      if (accepted) {
+        socket.to(roomId).emit('draw-element', enriched);
+        scheduleAutoSave(roomId);
+      } else {
+        // Tell the sender their element was rejected (stale)
+        socket.emit('element-rejected', { id: element.id });
       }
     });
 
-    // ── LIVE DRAWING (in-progress pencil strokes) ─────────────────────────
-    // High-frequency — broadcast only, never persist
     socket.on('drawing', ({ roomId, element }) => {
       socket.to(roomId).emit('drawing', element);
     });
 
-    // ── CURSOR MOVE ───────────────────────────────────────────────────────
-    // Throttled on client side; just relay here
     socket.on('cursor-move', ({ roomId, x, y }) => {
       updateCursor(roomId, socket.userId, { x, y });
       socket.to(roomId).emit('cursor-move', {
-        userId: socket.userId,
-        username: socket.username,
-        color: socket.color,
-        x,
-        y,
+        userId: socket.userId, username: socket.username, color: socket.color, x, y,
       });
     });
 
-    // ── CLEAR BOARD ───────────────────────────────────────────────────────
     socket.on('clear-board', async ({ roomId }) => {
+      getRoomElements(roomId).clear();
       socket.to(roomId).emit('clear-board');
       try {
         await Board.findOneAndUpdate(
-          { roomId },
-          { $set: { elements: [], updatedAt: new Date() } },
-          { upsert: true }
+          { roomId }, { $set: { elements: [], updatedAt: new Date() } }, { upsert: true }
         );
-      } catch (err) {
-        console.error(`Failed to clear board ${roomId}:`, err.message);
-      }
+        console.log(`[Clear] Room ${roomId}`);
+      } catch (err) { console.error(`[Clear] Failed:`, err.message); }
     });
 
-    // ── UNDO (sync full element state after undo) ─────────────────────────
-    socket.on('undo', async ({ roomId, elements }) => {
-      // Broadcast new state to peers
+    socket.on('undo', ({ roomId, elements }) => {
+      // Rebuild in-memory store from undo state
+      getRoomElements(roomId).clear();
+      elements.forEach(el => getRoomElements(roomId).set(el.id, el));
       socket.to(roomId).emit('sync-elements', elements);
-
-      // Debounced save (undo can fire rapidly)
-      scheduleAutoSave(roomId, elements);
+      scheduleAutoSave(roomId);
     });
 
-    // ── EXPLICIT SAVE (with version snapshot) ─────────────────────────────
     socket.on('save-board', async ({ roomId, elements }) => {
       try {
         await Board.findOneAndUpdate(
           { roomId },
           {
-            $set: { elements, updatedAt: new Date() },
-            $push: {
-              versions: {
-                $each: [{ elements, savedAt: new Date() }],
-                $slice: -10,  // keep last 10 versions
-              },
-            },
+            $set:  { elements, updatedAt: new Date() },
+            $push: { versions: { $each: [{ elements, savedAt: new Date(), savedBy: socket.username }], $slice: -10 } },
           },
-          { upsert: true }
+          { upsert: true, new: true }
         );
+        console.log(`[Save] Room ${roomId} explicit save (${elements.length} elements)`);
         socket.emit('save-success');
       } catch (err) {
-        console.error(`Explicit save failed for ${roomId}:`, err.message);
+        console.error(`[Save] Failed:`, err.message);
         socket.emit('save-error', err.message);
       }
     });
 
-    // ── DISCONNECT ────────────────────────────────────────────────────────
     socket.on('disconnect', () => {
       const { roomId, userId, username } = socket;
       if (!roomId) return;
-
       const users = leaveRoom(roomId, userId);
-      io.to(roomId).emit('user-left', { userId, username, users });
+      io.to(roomId).emit('user-left',     { userId, username, users });
       io.to(roomId).emit('users-updated', users);
-
-      console.log(`${username} left room ${roomId} (${users.length} remaining)`);
+      console.log(`[Socket] ${username} left ${roomId} (${users.length} remaining)`);
     });
   });
 };

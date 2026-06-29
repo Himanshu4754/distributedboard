@@ -3,35 +3,54 @@ import { v4 as uuidv4 } from 'uuid';
 import useBoardStore from '../store/boardStore';
 
 export const useCanvas = ({ emitDraw, emitCursor }) => {
-  const isDrawing = useRef(false);
-  const startPos = useRef({ x: 0, y: 0 });
-  const currentId = useRef(null);
-
-  const { tool, color, strokeWidth, addElement, updateLastElement } = useBoardStore();
+  const isDrawing  = useRef(false);
+  const startPos   = useRef({ x: 0, y: 0 });
+  const currentId  = useRef(null);
 
   const getPos = useCallback((e, stageRef) => {
-    const stage = stageRef.current;
-    const pos = stage.getPointerPosition();
+    const pos = stageRef.current.getPointerPosition();
     return { x: pos.x, y: pos.y };
   }, []);
 
   const onMouseDown = useCallback((e, stageRef) => {
-    isDrawing.current = true;
+    const { tool, color, strokeWidth, addElement } = useBoardStore.getState();
     const { x, y } = getPos(e, stageRef);
-    startPos.current = { x, y };
+
+    // ── Text tool: prompt and place immediately ──────────────────────────
+    if (tool === 'text') {
+      const text = window.prompt('Enter text:');
+      if (!text || !text.trim()) return;
+
+      const element = {
+        id:       uuidv4(),
+        tool:     'text',
+        x, y,
+        text:     text.trim(),
+        color,
+        fontSize: 20,
+        strokeWidth: 0,
+      };
+
+      addElement(element);
+      emitDraw(element);
+      return;
+    }
+
+    // ── All other tools ───────────────────────────────────────────────────
+    isDrawing.current = true;
+    startPos.current  = { x, y };
     currentId.current = uuidv4();
 
     if (tool === 'pencil' || tool === 'eraser') {
-      const element = {
-        id: currentId.current,
-        tool: tool === 'eraser' ? 'eraser' : 'pencil',
-        points: [x, y],
-        color: tool === 'eraser' ? '#0f172a' : color,
-        strokeWidth: tool === 'eraser' ? 24 : strokeWidth,
-      };
-      addElement(element);
+      addElement({
+        id:          currentId.current,
+        tool:        tool === 'eraser' ? 'eraser' : 'pencil',
+        points:      [x, y],
+        color:       tool === 'eraser' ? '#0f172a' : color,
+        strokeWidth: tool === 'eraser' ? 28 : strokeWidth,
+      });
     }
-  }, [tool, color, strokeWidth, addElement, getPos]);
+  }, [emitDraw, getPos]);
 
   const onMouseMove = useCallback((e, stageRef) => {
     const { x, y } = getPos(e, stageRef);
@@ -39,47 +58,46 @@ export const useCanvas = ({ emitDraw, emitCursor }) => {
 
     if (!isDrawing.current) return;
 
+    const { tool, color, strokeWidth, elements, updateLastElement, addElement } =
+      useBoardStore.getState();
+
     if (tool === 'pencil' || tool === 'eraser') {
-      // Update last element's points array
-      const store = useBoardStore.getState();
-      const last = store.elements[store.elements.length - 1];
+      const last = elements[elements.length - 1];
       if (!last || last.id !== currentId.current) return;
       updateLastElement({ ...last, points: [...last.points, x, y] });
-    } else if (tool === 'rect' || tool === 'circle') {
-      const store = useBoardStore.getState();
-      const elements = store.elements;
-      const inProgress = elements.find(el => el.id === currentId.current);
+      return;
+    }
 
+    if (tool === 'rect' || tool === 'circle') {
       const element = {
-        id: currentId.current,
+        id:          currentId.current,
         tool,
-        x: Math.min(x, startPos.current.x),
-        y: Math.min(y, startPos.current.y),
-        width: Math.abs(x - startPos.current.x),
-        height: Math.abs(y - startPos.current.y),
+        x:           Math.min(x, startPos.current.x),
+        y:           Math.min(y, startPos.current.y),
+        width:       Math.abs(x - startPos.current.x),
+        height:      Math.abs(y - startPos.current.y),
         color,
         strokeWidth,
       };
 
+      const inProgress = elements.find(el => el.id === currentId.current);
       if (inProgress) {
         updateLastElement(element);
       } else {
         addElement(element);
       }
     }
-  }, [tool, color, strokeWidth, addElement, updateLastElement, getPos, emitCursor]);
+  }, [emitCursor, getPos]);
 
   const onMouseUp = useCallback((e, stageRef) => {
     if (!isDrawing.current) return;
     isDrawing.current = false;
 
-    const store = useBoardStore.getState();
-    const last = store.elements[store.elements.length - 1];
-
+    const { elements } = useBoardStore.getState();
+    const last = elements[elements.length - 1];
     if (last && last.id === currentId.current) {
       emitDraw(last);
     }
-
     currentId.current = null;
   }, [emitDraw]);
 

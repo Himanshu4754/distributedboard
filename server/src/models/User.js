@@ -1,0 +1,29 @@
+import mongoose from 'mongoose';
+import bcrypt from 'bcryptjs';
+
+const userSchema = new mongoose.Schema({
+  username: { type: String, required: true, trim: true },
+  email:    { type: String, required: true, unique: true, lowercase: true, trim: true },
+  password: { type: String, required: true, minlength: 6 },
+  color:    { type: String, default: () => {
+    const colors = ['#6366f1','#f87171','#34d399','#fbbf24','#38bdf8','#e879f9'];
+    return colors[Math.floor(Math.random() * colors.length)];
+  }},
+  createdAt: { type: Date, default: Date.now },
+});
+
+userSchema.pre('save', async function (next) {
+  if (!this.isModified('password')) return next();
+  this.password = await bcrypt.hash(this.password, 12);
+  next();
+});
+
+userSchema.methods.comparePassword = function (candidate) {
+  return bcrypt.compare(candidate, this.password);
+};
+
+userSchema.methods.toSafeObject = function () {
+  return { id: this._id, username: this.username, email: this.email, color: this.color };
+};
+
+export default mongoose.model('User', userSchema);

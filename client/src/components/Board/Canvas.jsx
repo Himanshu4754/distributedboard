@@ -18,14 +18,17 @@ function DotGrid({ width, height }) {
   return <>{dots}</>;
 }
 
-export default function Canvas({ emitDraw, emitCursor, stageRef }) {
+export default function Canvas({ emitDraw, emitCursor, stageRef, canEdit=true }) {
   const { elements, tool } = useBoardStore();
   const { onMouseDown, onMouseMove, onMouseUp } = useCanvas({ emitDraw, emitCursor });
 
   const W = window.innerWidth  - 56;
   const H = window.innerHeight - 88; // top bar + status bar
 
-  const handleMouseDown = useCallback((e) => onMouseDown(e, stageRef), [onMouseDown, stageRef]);
+  const handleMouseDown = useCallback((e) => {
+    if (!canEdit) return;
+    onMouseDown(e, stageRef);
+  }, [onMouseDown, stageRef, canEdit]);
   const handleMouseMove = useCallback((e) => onMouseMove(e, stageRef), [onMouseMove, stageRef]);
   const handleMouseUp   = useCallback((e) => onMouseUp(e, stageRef),   [onMouseUp,   stageRef]);
 

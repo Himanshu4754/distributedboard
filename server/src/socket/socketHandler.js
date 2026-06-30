@@ -57,7 +57,16 @@ export const initSocketHandlers = (io) => {
   io.on('connection', (socket) => {
     console.log(`[Socket] Connected: ${socket.id}`);
 
-    socket.on('join-room', async ({ roomId, username }) => {
+    // ── Subscribe to personal notification channel ──────────────────────────
+    // Used by RequestAccess page to wait for approval, and owners to get
+    // join-request alerts, without going through the heavy board join-room logic
+    socket.on('subscribe-notifications', ({ userId }) => {
+      if (!userId) return;
+      socket.join(`user:${userId}`);
+      console.log(`[Notify] Socket ${socket.id} subscribed to user:${userId}`);
+    });
+
+    socket.on('join-room', async ({ roomId, username, userId }) => {
       socket.join(roomId);
       socket.roomId   = roomId;
       socket.username = username;
@@ -73,14 +82,14 @@ export const initSocketHandlers = (io) => {
       try {
         const board = await Board.findOne({ roomId }).lean();
         const elements = board?.elements ?? [];
-
-        // Seed in-memory store if empty (first load from DB)
         if (getRoomElements(roomId).size === 0 && elements.length > 0) {
           elements.forEach(el => getRoomElements(roomId).set(el.id, el));
         }
-
         console.log(`[Join] ${username} → room ${roomId} | ${elements.length} elements`);
         socket.emit('board-state', { elements, users });
+
+        // Also subscribe owner to their "owner inbox" for join request notifications
+        if (board?.owner) socket.join(`owner:${board.owner}`);
       } catch (err) {
         console.error(`[Join] Load failed for ${roomId}:`, err.message);
         socket.emit('board-state', { elements: [], users });

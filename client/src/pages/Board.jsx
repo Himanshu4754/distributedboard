@@ -26,6 +26,8 @@ export default function Board() {
   const [showVersions,  setShowVersions]  = useState(false);
   const [showReplay,    setShowReplay]    = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [accessChecked, setAccessChecked] = useState(false);
+  const [role, setRole]                   = useState(null); // 'owner' | 'editor' | 'viewer'
 
   const { user } = useAuthStore();
   const {
@@ -33,24 +35,44 @@ export default function Board() {
     elements, undo, isLoading, isSaving, setSaving, setTool,
   } = useBoardStore();
 
+  // Access check — runs before anything else
   useEffect(() => {
     if (!user) { navigate('/login'); return; }
-    setRoomId(roomId);
-    setUsername(user.username);
+    (async () => {
+      try {
+        const { data } = await api.get(`/api/boards/${roomId}/my-access`);
+        if (!data.hasAccess) {
+          navigate(`/join/${roomId}`);
+          return;
+        }
+        setRole(data.role);
+        setAccessChecked(true);
+      } catch {
+        navigate('/dashboard');
+      }
+    })();
   }, [roomId, user]);
 
+  useEffect(() => {
+    if (!accessChecked) return;
+    setRoomId(roomId);
+    setUsername(user.username);
+  }, [roomId, user, accessChecked]);
+
   const { emitDraw, emitClear, emitCursor, emitUndo, emitSave } =
-    useSocket(roomId, user?.username);
+    useSocket(accessChecked ? roomId : null, user?.username);
 
   const { isReplaying, replayProgress, startReplay, stopReplay } = useReplay();
 
-  useHotkeys('ctrl+z, meta+z', () => handleUndo(),  { preventDefault: true });
-  useHotkeys('ctrl+s, meta+s', () => handleSave(),  { preventDefault: true });
-  useHotkeys('p', () => setTool('pencil'),  { preventDefault: true });
-  useHotkeys('r', () => setTool('rect'),    { preventDefault: true });
-  useHotkeys('c', () => setTool('circle'),  { preventDefault: true });
-  useHotkeys('e', () => setTool('eraser'),  { preventDefault: true });
-  useHotkeys('t', () => setTool('text'),    { preventDefault: true });
+  const canEdit = role === 'owner' || role === 'editor';
+
+  useHotkeys('ctrl+z, meta+z', () => canEdit && handleUndo(), { preventDefault: true });
+  useHotkeys('ctrl+s, meta+s', () => canEdit && handleSave(), { preventDefault: true });
+  useHotkeys('p', () => canEdit && setTool('pencil'), { preventDefault: true });
+  useHotkeys('r', () => canEdit && setTool('rect'),   { preventDefault: true });
+  useHotkeys('c', () => canEdit && setTool('circle'), { preventDefault: true });
+  useHotkeys('e', () => canEdit && setTool('eraser'), { preventDefault: true });
+  useHotkeys('t', () => canEdit && setTool('text'),   { preventDefault: true });
   useHotkeys('escape', () => {
     setShowVersions(false); setShowReplay(false); setShowShortcuts(false);
   });
@@ -63,7 +85,6 @@ export default function Board() {
   async function handleSave() {
     setSaving(true);
     try {
-      // Generate thumbnail
       let thumbnail = '';
       if (stageRef.current) {
         thumbnail = stageRef.current.toDataURL({ pixelRatio: 0.3, mimeType: 'image/jpeg', quality: 0.5 });
@@ -77,11 +98,12 @@ export default function Board() {
   }
 
   const handleClear = useCallback(() => {
+    if (!canEdit) { toast.error('You have view-only access'); return; }
     if (!window.confirm('Clear the entire board for everyone?')) return;
     clearElements();
     emitClear();
     toast.success('Board cleared');
-  }, [clearElements, emitClear]);
+  }, [clearElements, emitClear, canEdit]);
 
   const handleExport = useCallback(() => {
     if (!stageRef.current) return;
@@ -96,9 +118,9 @@ export default function Board() {
   }, [roomId]);
 
   const handleCopyLink = useCallback(() => {
-    navigator.clipboard.writeText(window.location.href);
-    toast.success('Link copied!');
-  }, []);
+    navigator.clipboard.writeText(`${window.location.origin}/join/${roomId}`);
+    toast.success('Invite link copied!');
+  }, [roomId]);
 
   const togglePanel = (panel) => {
     setShowVersions(  panel === 'versions'  ? v => !v : false);
@@ -106,11 +128,17 @@ export default function Board() {
     setShowShortcuts( panel === 'shortcuts' ? v => !v : false);
   };
 
-  if (isLoading) return <LoadingSkeleton />;
+  if (!accessChecked || isLoading) return <LoadingSkeleton />;
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-slate-950 select-none">
-      <PresenceBadge onCopyLink={handleCopyLink} />
+      <PresenceBadge onCopyLink={handleCopyLink} isOwner={role === 'owner'} roomId={roomId} />
+
+      {role === 'viewer' && (
+        <div className="bg-amber-900/30 border-b border-amber-800/50 px-4 py-1.5 text-center">
+          <span className="text-amber-400 text-xs">👁 View-only access — you cannot edit this board</span>
+        </div>
+      )}
 
       <div className="flex flex-1 overflow-hidden relative">
         <Toolbar
@@ -120,20 +148,17 @@ export default function Board() {
           onReplay={()   => togglePanel('replay')}
           onShortcuts={() => togglePanel('shortcuts')}
           isSaving={isSaving}
+          canEdit={canEdit}
         />
 
         <div className="relative flex-1 overflow-hidden">
-          <Canvas stageRef={stageRef} emitDraw={emitDraw} emitCursor={emitCursor} />
+          <Canvas stageRef={stageRef} emitDraw={canEdit ? emitDraw : () => {}} emitCursor={emitCursor} canEdit={canEdit} />
           <CursorOverlay />
 
           {showVersions  && <VersionHistory roomId={roomId} onClose={() => setShowVersions(false)} />}
           {showReplay    && (
-            <ReplayPanel
-              elements={elements} isReplaying={isReplaying}
-              replayProgress={replayProgress}
-              onStart={startReplay} onStop={stopReplay}
-              onClose={() => setShowReplay(false)}
-            />
+            <ReplayPanel elements={elements} isReplaying={isReplaying} replayProgress={replayProgress}
+              onStart={startReplay} onStop={stopReplay} onClose={() => setShowReplay(false)} />
           )}
           {showShortcuts && <ShortcutsPanel onClose={() => setShowShortcuts(false)} />}
         </div>
@@ -141,7 +166,7 @@ export default function Board() {
 
       <div className="flex items-center justify-between px-4 py-1 bg-slate-900 border-t border-slate-800 text-xs text-slate-600 flex-shrink-0">
         <span>{elements.length} elements</span>
-        <span>P · R · C · E · T  for tools &nbsp;|&nbsp; Ctrl+Z undo &nbsp;|&nbsp; Ctrl+S save</span>
+        <span>Role: {role}</span>
         <div className="flex items-center gap-1.5">
           <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
           <span className="text-green-600">Connected</span>

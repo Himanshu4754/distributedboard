@@ -13,6 +13,7 @@ export default function Dashboard() {
   const [creating, setCreating] = useState(false);
   const [newName,  setNewName]  = useState('');
   const [showNew,  setShowNew]  = useState(false);
+  const [joinId, setJoinId] = useState('');
 
   useEffect(() => {
     if (!user) { navigate('/login'); return; }
@@ -85,7 +86,7 @@ export default function Dashboard() {
 
       <main className="max-w-6xl mx-auto px-6 py-8">
         {/* Page header */}
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center justify-between mb-4">
           <div>
             <h1 className="text-white text-2xl font-bold">My Boards</h1>
             <p className="text-slate-400 text-sm mt-1">{boards.length} board{boards.length !== 1 ? 's' : ''}</p>
@@ -95,6 +96,23 @@ export default function Dashboard() {
             className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-semibold transition shadow-lg shadow-indigo-900/30"
           >
             <Plus size={16} /> New board
+          </button>
+        </div>
+
+        {/* Join by room ID */}
+        <div className="flex items-center gap-2 mb-8 bg-slate-900 border border-slate-800 rounded-xl p-3">
+          <input
+            className="flex-1 px-3.5 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 text-sm font-mono focus:outline-none focus:border-indigo-500 transition"
+            placeholder="Have a room ID? Paste it here to join"
+            value={joinId}
+            onChange={(e) => setJoinId(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && joinId.trim() && navigate(`/join/${joinId.trim()}`)}
+          />
+          <button
+            onClick={() => joinId.trim() && navigate(`/join/${joinId.trim()}`)}
+            className="px-4 py-2 bg-slate-800 hover:bg-indigo-600 text-white rounded-lg text-sm font-medium transition"
+          >
+            Join
           </button>
         </div>
 

@@ -42,13 +42,17 @@ export const clearBoard = async (req, res) => {
 
 export const getUserBoards = async (req, res) => {
   try {
+    console.log(`[Dashboard] Fetching boards for user: ${req.user.username} (${req.user.email}) id=${req.user._id}`);
+
     const boards = await Board.find({
-      $or: [{ owner: req.user._id }, { members: req.user._id }],
+      $or: [{ owner: req.user._id }, { 'members.user': req.user._id }],
     })
       .select('roomId name thumbnail updatedAt members owner elements')
       .sort({ updatedAt: -1 })
       .limit(20)
       .lean();
+
+    console.log(`[Dashboard] Found ${boards.length} boards for ${req.user.username}`);
 
     const result = boards.map(b => ({
       roomId:       b.roomId,

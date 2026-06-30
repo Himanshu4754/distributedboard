@@ -3,9 +3,11 @@ import User from '../models/User.js';
 
 export const protect = async (req, res, next) => {
   try {
+    // Prioritize Bearer token (per-tab/per-browser via localStorage)
+    // Cookie is fallback only
     const token =
-      req.cookies?.token ||
-      req.headers.authorization?.replace('Bearer ', '');
+      req.headers.authorization?.replace('Bearer ', '') ||
+      req.cookies?.token;
 
     if (!token) return res.status(401).json({ error: 'Not authenticated' });
 
@@ -28,7 +30,7 @@ export const socketAuth = async (socket, next) => {
 
     if (!token) return next(new Error('Not authenticated'));
 
-    const decoded  = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const user     = await User.findById(decoded.id).select('-password');
     if (!user) return next(new Error('User not found'));
 

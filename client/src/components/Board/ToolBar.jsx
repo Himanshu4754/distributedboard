@@ -24,8 +24,9 @@ const STROKES = [2, 4, 8];
 export default function Toolbar({
   onClear, onSave, onUndo, onExport,
   onVersions, onReplay, onShortcuts,
-  isSaving,
+  isSaving, canEdit = true,
 }) {
+  const editClass = canEdit ? '' : 'opacity-40 pointer-events-none';
   const { tool, color, strokeWidth, setTool, setColor, setStrokeWidth } =
     useBoardStore();
 
@@ -34,6 +35,7 @@ export default function Toolbar({
       style={{ scrollbarWidth: 'none' }}
     >
       {/* Drawing tools */}
+      <div className={editClass}>
       <ToolSection label="Draw">
         {TOOLS.map(({ id, Icon, label, key }) => (
           <ToolBtn
@@ -46,10 +48,12 @@ export default function Toolbar({
           </ToolBtn>
         ))}
       </ToolSection>
+      </div>
 
       <Divider />
 
       {/* Stroke width */}
+      <div className={editClass}>
       <ToolSection label="Size">
         {STROKES.map((w) => (
           <button
@@ -69,10 +73,12 @@ export default function Toolbar({
           </button>
         ))}
       </ToolSection>
+      </div>
 
       <Divider />
 
       {/* Color palette */}
+      <div className={editClass}>
       <ToolSection label="Color">
         {COLORS.map((c) => (
           <button
@@ -92,17 +98,20 @@ export default function Toolbar({
           </div>
         </label>
       </ToolSection>
+      </div>
 
       <Divider />
 
       {/* Actions */}
+      <div className={editClass}>
       <ToolSection label="Edit">
         <ActionBtn onClick={onUndo}    tooltip="Undo (Ctrl+Z)"       Icon={Undo2}  />
         <ActionBtn onClick={onSave}    tooltip="Save snapshot (Ctrl+S)" Icon={Save} disabled={isSaving} pulse={isSaving} />
       </ToolSection>
+      </div>
 
       <Divider />
-
+      <div className={editClass}>
       <ToolSection label="More">
         <ActionBtn onClick={onExport}   tooltip="Export PNG"          Icon={Image}    />
         <ActionBtn onClick={onVersions} tooltip="Version history"     Icon={Clock}    />
@@ -110,6 +119,8 @@ export default function Toolbar({
         <ActionBtn onClick={onShortcuts}tooltip="Keyboard shortcuts"  Icon={Keyboard} />
         <ActionBtn onClick={onClear}    tooltip="Clear board"         Icon={Trash2}   danger />
       </ToolSection>
+      </div>
+
     </div>
   );
 }

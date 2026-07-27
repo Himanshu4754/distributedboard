@@ -70,7 +70,7 @@ export const initSocketHandlers = (io) => {
       socket.join(roomId);
       socket.roomId   = roomId;
       socket.username = username;
-      socket.userId   = uuidv4();
+      socket.userId   = userId || uuidv4();
       socket.color    = generateColor(socket.id);
 
       const users = joinRoom(roomId, {

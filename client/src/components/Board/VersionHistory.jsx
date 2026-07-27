@@ -1,10 +1,8 @@
 import { useState, useEffect } from 'react';
-import axios from 'axios';
+import api from '../../api/axios';
 import toast from 'react-hot-toast';
 import useBoardStore from '../../store/boardStore';
 import { socket } from '../../socket/socket';
-
-const SERVER_URL = import.meta.env.VITE_SERVER_URL;
 
 export default function VersionHistory({ roomId, onClose }) {
   const [versions, setVersions] = useState([]);
@@ -15,7 +13,7 @@ export default function VersionHistory({ roomId, onClose }) {
   useEffect(() => {
     const load = async () => {
       try {
-        const { data } = await axios.get(`${SERVER_URL}/api/boards/${roomId}/versions`);
+        const { data } = await api.get(`/api/boards/${roomId}/versions`);
         setVersions(data.versions);
       } catch {
         toast.error('Could not load versions');
@@ -30,15 +28,15 @@ export default function VersionHistory({ roomId, onClose }) {
     if (!window.confirm(`Restore version from ${formatDate(version.savedAt)}?`)) return;
     setRestoring(version.index);
     try {
-      const { data } = await axios.post(
-        `${SERVER_URL}/api/boards/${roomId}/restore/${version.index}`
+      const { data } = await api.post(
+        `/api/boards/${roomId}/restore/${version.index}`
       );
       setElements(data.elements);
       socket.emit('sync-elements', { roomId, elements: data.elements });
       toast.success('Version restored!');
       onClose();
-    } catch {
-      toast.error('Restore failed');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Restore failed');
     } finally {
       setRestoring(null);
     }

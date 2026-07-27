@@ -60,7 +60,7 @@ export default function Board() {
   }, [roomId, user, accessChecked]);
 
   const { emitDraw, emitClear, emitCursor, emitUndo, emitSave } =
-    useSocket(accessChecked ? roomId : null, user?.username);
+    useSocket(accessChecked ? roomId : null, user?.username, user?.id);
 
   const { isReplaying, replayProgress, startReplay, stopReplay } = useReplay();
 

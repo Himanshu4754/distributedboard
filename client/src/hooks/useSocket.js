@@ -3,7 +3,7 @@ import { socket } from '../socket/socket';
 import useBoardStore from '../store/boardStore';
 import toast from 'react-hot-toast';
 
-export const useSocket = (roomId, username) => {
+export const useSocket = (roomId, username, userId) => {
   const {
     addElement, setElements, clearElements,
     setUsers, updateCursor, removeCursor, setLoading,
@@ -12,7 +12,7 @@ export const useSocket = (roomId, username) => {
   const cursorThrottle = useRef(null);
 
   useEffect(() => {
-    if (!roomId || !username) return;
+    if (!roomId || !username || !userId) return;
 
     // Always force a clean slate: disconnect first if somehow already
     // connected from a previous page (e.g. RequestAccess), then reconnect
@@ -58,7 +58,7 @@ export const useSocket = (roomId, username) => {
     socket.on('connect', () => {
       console.log('[useSocket] Connected, joining room:', roomId);
       toast.dismiss('conn-err');
-      socket.emit('join-room', { roomId, username });
+      socket.emit('join-room', { roomId, username, userId });
     });
 
     socket.on('disconnect', (reason) => {
@@ -84,7 +84,7 @@ export const useSocket = (roomId, username) => {
       socket.removeAllListeners();
       socket.disconnect();
     };
-  }, [roomId, username]);
+  }, [roomId, username, userId]);
 
   const emitDraw = useCallback((element) => socket.emit('draw-element', { roomId, element }), [roomId]);
   const emitClear = useCallback(() => socket.emit('clear-board', { roomId }), [roomId]);

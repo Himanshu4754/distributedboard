@@ -70,8 +70,11 @@ export const initSocketHandlers = (io) => {
       socket.join(roomId);
       socket.roomId   = roomId;
       socket.username = username;
+      // Reuse the stable id the client sends (their account id) so a page
+      // refresh/reconnect is recognized as the SAME person, not a new one.
+      // Fall back to a fresh uuid only if none was provided (e.g. anon/testing).
       socket.userId   = userId || uuidv4();
-      socket.color    = generateColor(socket.id);
+      socket.color    = generateColor(socket.userId);
 
       const users = joinRoom(roomId, {
         id: socket.userId, socketId: socket.id, username, color: socket.color,
@@ -163,6 +166,17 @@ export const initSocketHandlers = (io) => {
     socket.on('disconnect', () => {
       const { roomId, userId, username } = socket;
       if (!roomId) return;
+
+      // If this user already has a NEWER socket registered (e.g. they hit
+      // refresh and the new tab's join-room beat this old socket's disconnect
+      // event), don't remove them — that would incorrectly boot the person
+      // who is still actively connected.
+      const current = getUsers(roomId).find(u => u.id === userId);
+      if (current && current.socketId !== socket.id) {
+        console.log(`[Socket] Stale disconnect ignored for ${username} (already reconnected)`);
+        return;
+      }
+
       const users = leaveRoom(roomId, userId);
       io.to(roomId).emit('user-left',     { userId, username, users });
       io.to(roomId).emit('users-updated', users);

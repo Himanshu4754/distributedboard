@@ -2,7 +2,7 @@ import { useRef, useCallback } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import useBoardStore from '../store/boardStore';
 
-export const useCanvas = ({ emitDraw, emitCursor }) => {
+export const useCanvas = ({ emitDraw, emitCursor, onTextTool }) => {
   const isDrawing  = useRef(false);
   const startPos   = useRef({ x: 0, y: 0 });
   const currentId  = useRef(null);
@@ -16,23 +16,9 @@ export const useCanvas = ({ emitDraw, emitCursor }) => {
     const { tool, color, strokeWidth, addElement } = useBoardStore.getState();
     const { x, y } = getPos(e, stageRef);
 
-    // ── Text tool: prompt and place immediately ──────────────────────────
+    // ── Text tool: open an inline input at the click point (instant) ──────
     if (tool === 'text') {
-      const text = window.prompt('Enter text:');
-      if (!text || !text.trim()) return;
-
-      const element = {
-        id:       uuidv4(),
-        tool:     'text',
-        x, y,
-        text:     text.trim(),
-        color,
-        fontSize: 20,
-        strokeWidth: 0,
-      };
-
-      addElement(element);
-      emitDraw(element);
+      onTextTool?.(x, y);
       return;
     }
 
@@ -50,7 +36,7 @@ export const useCanvas = ({ emitDraw, emitCursor }) => {
         strokeWidth: tool === 'eraser' ? 28 : strokeWidth,
       });
     }
-  }, [emitDraw, getPos]);
+  }, [emitDraw, getPos, onTextTool]);
 
   const onMouseMove = useCallback((e, stageRef) => {
     const { x, y } = getPos(e, stageRef);

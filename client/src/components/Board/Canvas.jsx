@@ -1,5 +1,6 @@
-import { useRef, useEffect, useCallback } from 'react';
-import { Stage, Layer, Line, Rect, Circle, Text, Group } from 'react-konva';
+import { useRef, useEffect, useCallback, useState } from 'react';
+import { v4 as uuidv4 } from 'uuid';
+import { Stage, Layer, Line, Rect, Circle, Ellipse, Text, Group } from 'react-konva';
 import useBoardStore from '../../store/boardStore';
 import { useCanvas } from '../../hooks/useCanvas';
 
@@ -19,8 +20,39 @@ function DotGrid({ width, height }) {
 }
 
 export default function Canvas({ emitDraw, emitCursor, stageRef, canEdit=true }) {
-  const { elements, tool } = useBoardStore();
-  const { onMouseDown, onMouseMove, onMouseUp } = useCanvas({ emitDraw, emitCursor });
+  const { elements, tool, color, addElement } = useBoardStore();
+
+  // Inline text editor: { x, y, value } while placing a text element, else null.
+  // Appears instantly (no native blocking dialog) right where the user clicked.
+  const [textEditor, setTextEditor] = useState(null);
+  const textInputRef = useRef(null);
+
+  const openTextEditor = useCallback((x, y) => {
+    setTextEditor({ x, y, value: '' });
+  }, []);
+
+  const { onMouseDown, onMouseMove, onMouseUp } =
+    useCanvas({ emitDraw, emitCursor, onTextTool: openTextEditor });
+
+  useEffect(() => {
+    if (textEditor && textInputRef.current) textInputRef.current.focus();
+  }, [textEditor]);
+
+  const commitTextEditor = () => {
+    const value = textEditor?.value.trim();
+    if (value) {
+      const element = {
+        id: uuidv4(), tool: 'text',
+        x: textEditor.x, y: textEditor.y,
+        text: value, color, fontSize: 20, strokeWidth: 0,
+      };
+      addElement(element);
+      emitDraw(element);
+    }
+    setTextEditor(null);
+  };
+
+  const cancelTextEditor = () => setTextEditor(null);
 
   const W = window.innerWidth  - 56;
   const H = window.innerHeight - 88; // top bar + status bar
@@ -78,7 +110,7 @@ export default function Canvas({ emitDraw, emitCursor, stageRef, canEdit=true })
 
       case 'circle':
         return (
-          <Circle
+          <Ellipse
             {...base}
             key={el.id}
             x={el.x + (el.width  || 0) / 2}
@@ -107,27 +139,57 @@ export default function Canvas({ emitDraw, emitCursor, stageRef, canEdit=true })
   };
 
   return (
-    <Stage
-      ref={stageRef}
-      width={W}
-      height={H}
-      onMouseDown={handleMouseDown}
-      onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
-      onTouchStart={handleMouseDown}
-      onTouchMove={handleMouseMove}
-      onTouchEnd={handleMouseUp}
-      style={{ background: '#0f172a', cursor: getCursor() }}
-    >
-      {/* Dot grid layer — never redraws */}
-      <Layer listening={false}>
-        <DotGrid width={W} height={H} />
-      </Layer>
+    <div style={{ position: 'relative', width: W, height: H }}>
+      <Stage
+        ref={stageRef}
+        width={W}
+        height={H}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onTouchStart={handleMouseDown}
+        onTouchMove={handleMouseMove}
+        onTouchEnd={handleMouseUp}
+        style={{ background: '#0f172a', cursor: getCursor() }}
+      >
+        {/* Dot grid layer — never redraws */}
+        <Layer listening={false}>
+          <DotGrid width={W} height={H} />
+        </Layer>
 
-      {/* Drawing layer */}
-      <Layer>
-        {elements.map(renderElement)}
-      </Layer>
-    </Stage>
+        {/* Drawing layer */}
+        <Layer>
+          {elements.map(renderElement)}
+        </Layer>
+      </Stage>
+
+      {/* Instant inline text input — replaces the old blocking window.prompt */}
+      {textEditor && (
+        <input
+          ref={textInputRef}
+          value={textEditor.value}
+          onChange={(e) => setTextEditor(t => ({ ...t, value: e.target.value }))}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commitTextEditor();
+            if (e.key === 'Escape') cancelTextEditor();
+          }}
+          onBlur={commitTextEditor}
+          placeholder="Type text…"
+          style={{
+            position: 'absolute',
+            left: textEditor.x,
+            top: textEditor.y - 2,
+            fontSize: 20,
+            fontFamily: 'Inter, sans-serif',
+            color,
+            background: 'transparent',
+            border: '1px dashed #6366f1',
+            outline: 'none',
+            padding: '0 2px',
+            minWidth: 120,
+          }}
+        />
+      )}
+    </div>
   );
 }
